@@ -1,0 +1,182 @@
+esphome:
+  name: aipi
+  friendly_name: AiPi
+
+esp32:
+  variant: esp32s3
+  framework:
+    type: esp-idf
+  flash_size: 16MB
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: "XXXXXXXXXXXXXXXXXXX="
+
+ota:
+  - platform: esphome
+    password: "XXXXXXXXXXXXXXXXXXX"
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Aipi Fallback Hotspot"
+    password: "JFjmkWkpP0ES"
+
+captive_portal:
+
+web_server:
+  port: 80
+    
+font:
+  - file: "gfonts://Roboto"
+    id: my_font
+    size: 22
+
+# Setup SPI communcation for LCD display
+spi:
+  clk_pin: GPIO16
+  mosi_pin: GPIO17
+#  miso_pin: GPIOXX
+
+#128x128 ST7735 SPI display
+display:
+  - platform: mipi_spi
+    id: lcd_display
+    model: ST7735
+    dc_pin: GPIO7
+    cs_pin: GPIO15
+    reset_pin: GPIO18
+    dimensions: 128x128
+    rotation: 90
+    invert_colors: true
+    auto_clear_enabled: false
+    update_interval: never
+
+#Basic LVGL widget
+lvgl:
+  widgets:
+    - label:
+        align: CENTER
+        text: 'Hello World!'
+        text_font: my_font
+        text_color: blue
+
+#Add switches for the LCD backlight and speaker enable
+switch:
+  - platform: gpio
+    id: lcd_backlight
+    name: "LCD Backlight"
+    pin:
+      number: GPIO3
+    restore_mode: RESTORE_DEFAULT_ON
+  - platform: gpio
+    id: speaker_enable
+    name: "Speaker Enabled"
+    pin:
+      number: GPIO9
+    restore_mode: RESTORE_DEFAULT_ON
+
+#Expose button to Home Assistant, play a short beep when right button clicked
+binary_sensor:
+  - platform: gpio
+    pin: GPIO42
+    name: "Right Button"
+    filters: 
+      - invert:      
+    on_press: 
+      then:
+        - logger.log: "Right"
+        - light.toggle:
+            id: status_light
+        - media_player.speaker.play_on_device_media_file:
+                    media_file: beep
+                    announcement: true
+
+# Left button can work with Home Assistant but causes strange behavior, looks like designed to use only as a sleep/wakeup button
+#
+#  - platform: switch
+#    source_id: left_button
+#    name: "Left Button"
+#    on_press: 
+#      then:
+#        - logger.log: "Left"
+
+#LED seems to be a WS2812 pixel
+light:
+  - platform: esp32_rmt_led_strip
+    rgb_order: GRB
+    pin: GPIO46
+    num_leds: 1
+    chipset: ws2812
+    id: status_light
+    name: "Status Light"
+    restore_mode: RESTORE_DEFAULT_ON
+
+#I2C for configuring the ES8311 
+i2c:
+  sda: GPIO5
+  scl: GPIO4
+  scan: true
+  id: i2c_es8311
+
+#ES8311 DAC
+#Using 16bit audio at 16 kHz for best compatability 
+audio_dac:
+  - platform: es8311
+    id: es8311_dac
+    bits_per_sample: 16bit
+    sample_rate: 16000
+    i2c_id: i2c_es8311
+
+#I2S used for both mic in and audio out
+i2s_audio:
+- id: i2s_es8311
+  i2s_lrclk_pin: GPIO12
+  i2s_bclk_pin: GPIO14
+  i2s_mclk_pin: GPIO6
+  
+#Speaker component using the ES8311 DAC
+speaker:
+  - platform: i2s_audio
+    i2s_audio_id: i2s_es8311
+    id: speaker_id
+    i2s_dout_pin: GPIO11
+    dac_type: external
+    sample_rate: 16000
+    bits_per_sample: 16bit
+    channel: mono
+    audio_dac: es8311_dac
+
+#Setup a media payer so Home Assistant can play audio
+#Comment out files if not using beep.wav
+#Setting volume to higher than 80% causes a lot of distortion, 70-75% is a good max
+media_player:
+  - platform: speaker
+    name: "ESPHome I2S Media Player"
+    id: speaker_media_player_id
+    buffer_size: 50000
+    announcement_pipeline:
+        speaker: speaker_id
+        num_channels: 1
+    files:
+      - id: beep
+        file: "beep.wav"
+
+#Microphone set up but unused for now
+microphone:
+  - platform: i2s_audio
+    id: i2s_mic
+    adc_type: external
+    i2s_din_pin: GPIO13
+    on_data: 
+      then:
+        - logger.log: "Mic input received"
+
+    
